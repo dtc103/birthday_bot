@@ -1,0 +1,5 @@
+{
+    "birthdays": [
+        {"userid": 123, "day": 21, "month":123, "year": 123, "timezone": "DE"}
+    ]
+}
