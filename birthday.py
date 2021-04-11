@@ -1,17 +1,12 @@
 import discord
 from discord.ext import commands, tasks
-
 import json
-
 from datetime import date
-
 import asyncio
-
 import utilities
-
 import sqlite3
-
 import os
+import birthday_database_ops
 
 class BirthdayCog(commands.Cog):
     admin_roles = ["Admin", "Mod(keeping the streets clean)"]
@@ -31,12 +26,26 @@ class BirthdayCog(commands.Cog):
         create_bd_table = """CREATE TABLE birthdays(
             userid TEXT(200) NOT NULL,
             username TEXT(200),
-            birthday TEXT(10),
+            birthday TEXT(10), //in format: dd-mm-yyyy
             timezone TEXT(10),
             PRIMARY KEY(userid)
-        );
-        """
+        );"""
+
+        create_admin_table = """CREATE TABLE admin_roles(
+            roleid TEXT(200) NOT NULL,
+            PRIMARY KEY(roleid)
+        );"""
+
+        create_message_table = """CREATE TABLE message_info(
+            messageid TEXT(200) NOT NULL,
+            channelid TEXT(200) NOT NULL,
+            PRIMARY KEY(messageid)
+        );"""
+
         cursor.execute(create_bd_table)
+        #cursor.execute(create_admin_table)
+        #cursor.execute(create_message_table)
+
         self.birthday_database_connection.commit()
 
 ##################### USER COMMANDS ############################################################
@@ -64,7 +73,7 @@ class BirthdayCog(commands.Cog):
             await ctx.send(f"invalid year input - year has to be between 1900 and {date.today().year - 12}")
             return
 
-        self.save_birthday_db(ctx.author, day, month, year, timezone)
+        birthday_database_ops.save_birthday(self.birthday_database_connection, ctx.author.id, ctx.author.name, day, month, year, timezone)
 
     @commands.command(name="remove")
     async def remove_birthday(self, ctx: commands.Context):
@@ -76,7 +85,7 @@ class BirthdayCog(commands.Cog):
             return
 
         if await utilities.wait_for_query("Do you really want to delete your birthday from the birthday list?"):
-            self.remove_birthday_db(ctx.author)
+            birthday_database_ops.remove_birthday(self.birthday_database_connection, ctx.author.id)
 
     @commands.command(name="edit")
     async def edit_birthday(self, ctx: commands.Context, day=None, month=None, year=None):
@@ -102,9 +111,7 @@ class BirthdayCog(commands.Cog):
             await ctx.send(f"invalid year input - year has to be between 1900 and {date.today().year - 12}")
             return
         
-        self.edit_birthday_db(ctx.author, day, month, year, timezone)
-        
-        pass
+        birthday_database_ops.edit_birthday(self.birthday_database_connection, ctx.author.id, day, month, year, timezone)
 
 ##################### ADMIN COMMANDS ###########################################################
     @commands.group(name="admin", pass_context=True)
@@ -147,14 +154,10 @@ class BirthdayCog(commands.Cog):
 
 ##################### HELPERS ##################################################################
     def already_on_list(self, member: discord.Member):
-        '''checks if member is already on the list'''
-        cursor = self.birthday_database_connection.cursor()
+        '''checks if member is already on the list and in the database'''
 
-        stmt = "SELECT userid FROM birthdays;"
-        cursor.execute(stmt)
-
-        for userid in cursor.fetchall():
-            if str(member.id) == userid[0]:
+        for userid in birthday_database_ops.get_birthday_users():
+            if str(member.id) == userid:
                 return True
 
         return False
@@ -180,6 +183,7 @@ class BirthdayCog(commands.Cog):
 
         return embed
 
+    #FUTURE FEATURE
     def get_timezone_embed(self):
         '''returns the embed for the timeone query
             UTC-12:00 International Date Line West
@@ -221,7 +225,6 @@ class BirthdayCog(commands.Cog):
             UTC+13:00 Nuku'alofa, Samoa
             UTC+14:00 Kiritimati island, Line Islands Standard time
         '''
-        #TODO
         pass
 
     async def query_birthday_data(self, ctx):
@@ -252,56 +255,21 @@ class BirthdayCog(commands.Cog):
             await ctx.send(f"invalid input format - input has to be a NUMBER between 1900 and {date.today().year - 12}")
             return
 
-        #TODO timezone 
         timezone = None
-        if await utilities.wait_for_query(self.bot, ctx, message="Do you want to add your timezone for more accuracy?"):
-            timezone_embed = self.get_timezone_embed()
-            await ctx.send(embed=timezone_embed)
-            try:
-                timezone = await utilities.wait_for_message(self.bot, ctx, "type in the number of your timezone")
-            except:
-                await ctx.send(f"invalid input format - input has to be a NUMBER between 1 and 24")
+        #TODO FUTURE FEATURE 
+        # if await utilities.wait_for_query(self.bot, ctx, message="Do you want to add your timezone for more accuracy?"):
+        #     timezone_embed = self.get_timezone_embed()
+        #     await ctx.send(embed=timezone_embed)
+        #     try:
+        #         timezone = await utilities.wait_for_message(self.bot, ctx, "type in the number of your timezone")
+        #     except:
+        #         await ctx.send(f"invalid input format - input has to be a NUMBER between 1 and 24")
 
-            if timezone < 1 or timezone > 24:
-                await ctx.send(f"invalid timezone input - timezone has to be one of these shown above")
-                return
+        #     if timezone < 1 or timezone > 24:
+        #         await ctx.send(f"invalid timezone input - timezone has to be one of these shown above")
+        #         return
 
         return (day, month, year, timezone)
-
-    def save_birthday_db(self, member: discord.Member, day, month, year, timezone=None):
-        db_cursor = self.birthday_database_connection.cursor()
-
-        date = f"{day}-{month}-{year}"
-
-        if timezone is not None:
-            stmt = "INSERT INTO birthdays (userid, username, birthday, timezone) VALUES(?, ?, ?, NULL);"
-            db_cursor.execute(stmt, (str(member.id), member.name, date))
-        else:
-            stmt = "INSERT INTO birthdays (userid, username, birthday, timezone) VALUES(?, ?, ?, ?);"
-            db_cursor.execute(stmt, (str(member.id), member.name, date, timezone))
-
-        self.birthday_database_connection.commit()
-
-    def edit_birthday_db(self, member: discord.Member, day, month, year, timezone=None):
-        db_cursor = self.birthday_database_connection.cursor()
-        
-        if timezone is not None:
-            stmt = """UPDATE birthdays SET day=?, month=?, year=?, timezone=? WHERE userid=?;"""
-            db_cursor.execute(stmt, (day, month, year, timezone, str(member.id)))
-        else:
-            stmt = """UPDATE birthdays SET day=?, month=?, year=?, timezone=NULL WHERE userid=?;"""
-            db_cursor.execute(stmt, (day, month, year, str(member.id)))
-        
-        self.birthday_database_connection.commit()
-
-    async def remove_birthday_db(self, member: discord.Member):
-        await remove_bd_role(self, member)
-
-        db_cursor = self.birthday_database_connection.cursor()
-        stmt = """DELETE FROM birthdays WHERE userid=?;"""
-        db_cursor.execute(stmt, (str(member.id)))
-
-        self.birthday_database_connection.commit()
 
     async def remove_bd_role(self, member: discord.Member):
         await member.remove_roles(list(discord.utils.find(lambda role: role.id == self.bd_role_id, self.bot.guilds[0].roles)))     
@@ -313,5 +281,5 @@ class BirthdayCog(commands.Cog):
         #TODO
         pass
 
-    async def birthday_notification(self, channelid):
+    async def birthday_notification(self, channelid, userid):
         pass

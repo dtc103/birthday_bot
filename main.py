@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from birthday import BirthdayCog
 
 import sqlite3
+import database_test
 
 load_dotenv()
 
@@ -18,7 +19,5 @@ bot.add_cog(BirthdayCog(bot))
 #bot.run(TOKEN)
 
 conn = sqlite3.connect("birthdays.db")
-cursor = conn.cursor()
-
-cursor.execute("INSERT INTO birthdays (userid, username, birthday, timezone) VALUES('12231', 'otherName', '3-2-1998', NULL);")
-conn.commit()
+database_test.fill_random_values(conn, 10000)
+#database_test.delete_table(conn)
