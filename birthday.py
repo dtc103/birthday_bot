@@ -7,6 +7,7 @@ import utilities
 import sqlite3
 import os
 import birthday_database_ops
+import embeds
 
 class BirthdayCog(commands.Cog):
     admin_roles = ["Admin", "Mod(keeping the streets clean)"]
@@ -48,6 +49,7 @@ class BirthdayCog(commands.Cog):
 
         self.birthday_database_connection.commit()
 
+
 ##################### USER COMMANDS ############################################################
     @commands.command(name="add")
     async def add_birthday(self, ctx: commands.Context, day: int=None, month: int=None, year: int=None):
@@ -84,7 +86,8 @@ class BirthdayCog(commands.Cog):
         if ctx.guild == None:
             return
 
-        if await utilities.wait_for_query("Do you really want to delete your birthday from the birthday list?"):
+        if await utilities.wait_for_query(self.bot, ctx, "Do you really want to delete your birthday from the birthday list?"):
+            await self.remove_bd_role(ctx.author)
             birthday_database_ops.remove_birthday(self.birthday_database_connection, ctx.author.id)
 
     @commands.command(name="edit")
@@ -110,8 +113,11 @@ class BirthdayCog(commands.Cog):
         if year < 1900 or year > int(date.today().year) - 12:
             await ctx.send(f"invalid year input - year has to be between 1900 and {date.today().year - 12}")
             return
+
+        timezone = None
         
         birthday_database_ops.edit_birthday(self.birthday_database_connection, ctx.author.id, day, month, year, timezone)
+
 
 ##################### ADMIN COMMANDS ###########################################################
     @commands.group(name="admin", pass_context=True)
@@ -156,80 +162,15 @@ class BirthdayCog(commands.Cog):
     def already_on_list(self, member: discord.Member):
         '''checks if member is already on the list and in the database'''
 
-        for userid in birthday_database_ops.get_birthday_users():
+        for userid in birthday_database_ops.get_birthday_users(self.birthday_database_connection):
             if str(member.id) == userid:
                 return True
 
-        return False
-
-    def get_day_embed(self):
-        '''returns the embed for the birthday day query'''
-        embed = discord.Embed(color=discord.Color.blurple())
-        embed.add_field(name="Choose day", value="Type in a number between 1 and 31")
-
-        return embed
-
-    def get_month_embed(self):
-        '''returns the embed for the birthday month query'''
-        embed = discord.Embed(color=discord.Color.blurple())
-        embed.add_field(name="Choose month", value="Type in a number between 1 and 12")
-
-        return embed
-
-    def get_year_embed(self):
-        '''returns the embed for the birthday year query'''
-        embed = discord.Embed(color=discord.Color.blurple())
-        embed.add_field(name="Choose year", value=f"Type in a number between 1900 and {date.today().year - 12}")
-
-        return embed
-
-    #FUTURE FEATURE
-    def get_timezone_embed(self):
-        '''returns the embed for the timeone query
-            UTC-12:00 International Date Line West
-            UTC-11:00 Coordinated universal Time-11
-            UTC-10:00 Aleutian Islands, Hawaii
-            UTC-9:30 Marquesas Islands
-            UTC-9:00 Alaska, Coordinated Universal Time-09
-            UTC-8:00 Baja California, Pacific Standard Time(Mexico, Canada, USA)
-            UTC-7:00 Arizona, Chihuahua, La paz, Mazatlan, Mountain Standard Time(Mexico, Canada, USA)
-            UTC-6:00 Central America, Central Standard Time(Mexico, Canadam, USA), Easter Island, Guadalajara, Mexico City, Monterrey, Saskatchewan
-            UTC-5:00 Bogota, Lima, Quito, Rio Branco, Chetumal, Eastern Standard Time(Mexico, Canada, USA), Hiti, Havana, Indiana, Turks, Caicos
-            UTC-4:00 Asuncion, Atlantic Standard Time(Canada), Caracas, Cuiaba, Georgetown La Paz, Manaus, San Juan, Santiago
-            UTC-3:30 Newfoundland Standard Time
-            UTC-3:00 Araguaina, Brasilia, Cayenne, Fortaleza, Buesnos Aires, Greenland, Montevideo, Punta Arenas, Saint Pierre and Miquelon, Salvador
-            UTC-2:00 Coordinated Universal Time-02
-            UTC-1:00 Azores, Cabo Verde
-            UTC+00:00 Dublin, Edinburgh, Lisbon, London, Monrovia Reykjavik, Sao Tome, Greenwich Standard Time
-            UTC+01:00 Casablanca, Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna, Belgrade, Bratislava, Budapest, Ljubljana, Prague, Brussels, Copenhagen, Madrid, paris, Sarajevo, Skopje, Warsaw, Zagreb, West Central Africa
-            UTC+02:00 Amman, Athens Bucharest, Beirut, Cairo, Chisinau, Damascus, Gaza, Hebron, Harare, Pretoria, Helsinki, Kyiv, Riga, Sofia, Tallinn, Vilnius, Jersusalem, Kaliningrad, Khartoum, Tripoli, Windhoek
-            UTC+03:00 Baghdad, Istanbul, Kuwait, Riyadh, Mins, Moscow, St. Petersburg, Nairobi
-            UTC+03:30 Tehran
-            UTC+04:00 Abu Dhabi, Muscat, Astrakhan, Ulyanovsk, Baku, Azerbaijan, Izhevsk, Samara, Port Louis, Saratov, Tbilisi, Volgograd, Yerevan
-            UTC+04:30 Kabul, Afghanistan
-            UTC+05:00 Ashgabat, Tashkent, West Asia Standard Time, Ekaterinburg, Islamabad, Karachi, Pakistan, Qyzylorda
-            UTC+05:30 Chennai, Kolkata, Mumbai, New Dheli, India Standard Time, Sri Jayawardenepura, Sri Lanka, Standard Time
-            UTC+05:45 Kathmandu, Nepal Standard Time
-            UTC+06:00 Astana, Dhaka, Omsk, Bangladesh Standard Time, Central Asia Standard Time
-            UTC+06:30 Yangon(Rangoon), Myanmar Standard Time
-            UTC+07:00 Bangkik, Hanoi, Jakarta, Barnaul, Gorno-Altaysk, Hovd, Krasnoyarsk, North Asia Standard Time
-            UTC+08:00 Beijing, Chongqing, Hong Kong, Urumqi, China Standard Time, Irkutsk, Kuala Lumpur, Singapore, Perth, Taipei, Ulaanbaatar
-            UTC+8:45 Eucla, Australian Central Western Standard Time
-            UTC+09:00 Chita, Osaka, Sapporo, Tokyo, Pyongyang, Seoul, Yakutsk, Korea Standard Time
-            UTC+09:30 Adelaide, Darwin Central Australian Standard Time
-            UTC+10:00 Brisbane, Canberra, Melbourne, Sydney, Guam, Port Moresby, Hobart, Vladivostok, Eastern Australia Standard Time, West Pacific Standarf Time
-            UTC+10:30 Lord Howe Island
-            UTC+11:00 Bougainville island, Chokurdah, Magadan, Norflok Island, Sakhalin, Solomon Islands, New Caledonia
-            UTC+12:00 Anadyr, Petropavlovsk-Kachatsky, Auckland, Wellington, New Zealand Standard Time, Fiji
-            UTC+12:45 Chatham islands
-            UTC+13:00 Nuku'alofa, Samoa
-            UTC+14:00 Kiritimati island, Line Islands Standard time
-        '''
-        pass
+        return False 
 
     async def query_birthday_data(self, ctx):
         #answering day
-        day_embed = self.get_day_embed()
+        day_embed = embeds.day_embed()
         await ctx.send(embed=day_embed)
         try:
             day = int((await utilities.wait_for_message(self.bot, ctx, timeout=20)).content)
@@ -238,7 +179,7 @@ class BirthdayCog(commands.Cog):
             return
 
         #answering month
-        month_embed = self.get_month_embed()
+        month_embed = embeds.month_embed()
         await ctx.send(embed=month_embed)
         try:
             month = int((await utilities.wait_for_message(self.bot, ctx, timeout=20)).content)
@@ -247,7 +188,7 @@ class BirthdayCog(commands.Cog):
             return
 
         #answering year
-        year_embed = self.get_year_embed()
+        year_embed = embeds.year_embed()
         await ctx.send(embed=year_embed)
         try:
             year = int((await utilities.wait_for_message(self.bot, ctx, timeout=20)).content)
@@ -258,7 +199,7 @@ class BirthdayCog(commands.Cog):
         timezone = None
         #TODO FUTURE FEATURE 
         # if await utilities.wait_for_query(self.bot, ctx, message="Do you want to add your timezone for more accuracy?"):
-        #     timezone_embed = self.get_timezone_embed()
+        #     timezone_embed = embeds.timezone_embed()
         #     await ctx.send(embed=timezone_embed)
         #     try:
         #         timezone = await utilities.wait_for_message(self.bot, ctx, "type in the number of your timezone")
@@ -282,4 +223,5 @@ class BirthdayCog(commands.Cog):
         pass
 
     async def birthday_notification(self, channelid, userid):
+        '''mentions the user who has birthday'''
         pass
