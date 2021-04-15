@@ -15,8 +15,8 @@ import os
 
 class BirthdayCog(commands.Cog):
     admin_roles = ["Admin", "Mod(keeping the streets clean)"]
-    bd_channel_id=787140921623969833
-    bd_role_id=790591300579360769
+    bd_channel_id=808719852025151559 #Sket: 787140921623969833
+    bd_role_id=808719851500732484 #Sket: 790591300579360769
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -135,6 +135,7 @@ class BirthdayCog(commands.Cog):
     @tasks.loop(minutes=15)
     async def check_role(self):
         #TODO also check if every user in the database is still in the server and delete his account if he left the server, but is still on the list
+        
 
         #if current date fits to the dates in 
         curr_date = date.today().strftime("%d/%m/%Y")
