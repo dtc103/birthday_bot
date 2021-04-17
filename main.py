@@ -13,7 +13,11 @@ load_dotenv()
 
 TOKEN = os.getenv("TOKEN")
 
-bot = commands.Bot(command_prefix="bday$")
+intents = discord.Intents.default()
+intents.members = True
+
+#to get access to the "getch memeber method"
+bot = commands.Bot(command_prefix="bday$", intents=intents)
 bot.add_cog(BirthdayCog(bot))
 
 bot.run(TOKEN)

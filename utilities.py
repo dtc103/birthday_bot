@@ -73,4 +73,3 @@ async def has_role(member:discord.Member, accepted_roles):
             return True
 
     return False
-

@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands, tasks
 import json
-from datetime import date
+from datetime import date, datetime
 import asyncio
 import utilities
 import sqlite3
@@ -13,12 +13,14 @@ class BirthdayCog(commands.Cog):
     admin_roles = ["Admin", "Mod(keeping the streets clean)"]
     bd_channel_id=808719852025151559 #Sket: 787140921623969833
     bd_role_id=808719851500732484 #Sket: 790591300579360769
+    sket_or_test_server = 1 #1=test server, 0=sket
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
         if os.path.exists("birthdays.db"):
             self.birthday_database_connection = sqlite3.connect("birthdays.db")
+            self.check_role.start()
             return
         
         self.birthday_database_connection = sqlite3.connect("birthdays.db")
@@ -27,7 +29,8 @@ class BirthdayCog(commands.Cog):
         create_bd_table = """CREATE TABLE birthdays(
             userid TEXT(200) NOT NULL,
             username TEXT(200),
-            birthday TEXT(10), //in format: dd-mm-yyyy
+            birthday TEXT(10),
+            is_congratulated BOOLEAN NOT NULL,
             timezone TEXT(10),
             PRIMARY KEY(userid)
         );"""
@@ -44,24 +47,28 @@ class BirthdayCog(commands.Cog):
         );"""
 
         cursor.execute(create_bd_table)
-        #cursor.execute(create_admin_table)
-        #cursor.execute(create_message_table)
+        cursor.execute(create_admin_table)
+        cursor.execute(create_message_table)
 
         self.birthday_database_connection.commit()
+
+        self.check_role.start()
 
 
 ##################### USER COMMANDS ############################################################
     @commands.command(name="add")
-    async def add_birthday(self, ctx: commands.Context, day: int=None, month: int=None, year: int=None):
+    async def add_birthday(self, ctx: commands.Context, day: int=None, month: int=None):
         if self.already_on_list(ctx.author):
             await ctx.send(f"{ctx.author.mention} you are already on the birthday list")
             return
 
         if ctx.guild == None:
             return
+
+        timezone = None
         
-        if day is None or month is None or year is None:
-            (day, month, year, timezone) = await self.query_birthday_data(ctx)
+        if day is None or month is None:
+            (day, month, timezone) = await self.query_birthday_data(ctx)
 
         if day < 1 or day > 31:
             await ctx.send(f"invalid day input - day has to be between 1 and 31")
@@ -70,12 +77,9 @@ class BirthdayCog(commands.Cog):
         if month < 1 or month > 12:
             await ctx.send(f"invalid month input - month has to be between 1 and 12")
             return 
-        
-        if year < 1900 or year > int(date.today().year) - 12:
-            await ctx.send(f"invalid year input - year has to be between 1900 and {date.today().year - 12}")
-            return
 
-        birthday_database_ops.save_birthday(self.birthday_database_connection, ctx.author.id, ctx.author.name, day, month, year, timezone)
+        birthday_database_ops.save_birthday(self.birthday_database_connection, ctx.author.id, ctx.author.name, day, month, timezone)
+        await self.update_table()
 
     @commands.command(name="remove")
     async def remove_birthday(self, ctx: commands.Context):
@@ -89,9 +93,10 @@ class BirthdayCog(commands.Cog):
         if await utilities.wait_for_query(self.bot, ctx, "Do you really want to delete your birthday from the birthday list?"):
             await self.remove_bd_role(ctx.author)
             birthday_database_ops.remove_birthday(self.birthday_database_connection, ctx.author.id)
+            await self.update_table()
 
     @commands.command(name="edit")
-    async def edit_birthday(self, ctx: commands.Context, day=None, month=None, year=None):
+    async def edit_birthday(self, ctx: commands.Context, day: int=None, month: int=None):
         if not self.already_on_list(ctx.author):
             await ctx.send(f"{ctx.author.mention} you are not on the birthday list yet")
             return
@@ -99,7 +104,9 @@ class BirthdayCog(commands.Cog):
         if ctx.guild == None:
             return
 
-        if day is None or month is None or year is None:
+        timezone = None
+
+        if day is None or month is None:
             (day, month, year, timezon) = await self.query_birthday_data(ctx)
 
         if day < 1 or day > 31:
@@ -110,13 +117,8 @@ class BirthdayCog(commands.Cog):
             await ctx.send(f"invalid month input - month has to be between 1 and 12")
             return 
         
-        if year < 1900 or year > int(date.today().year) - 12:
-            await ctx.send(f"invalid year input - year has to be between 1900 and {date.today().year - 12}")
-            return
-
-        timezone = None
-        
-        birthday_database_ops.edit_birthday(self.birthday_database_connection, ctx.author.id, day, month, year, timezone)
+        birthday_database_ops.edit_birthday(self.birthday_database_connection, ctx.author.id, day, month, timezone)
+        await self.update_table()
 
 
 ##################### ADMIN COMMANDS ###########################################################
@@ -145,29 +147,34 @@ class BirthdayCog(commands.Cog):
 
 
 ##################### LOOPS ####################################################################
-    @tasks.loop(minutes=15)
+    @tasks.loop(seconds=10)#minutes=15)
     async def check_role(self):
-        #TODO also check if every user in the database is still in the server and delete his account if he left the server, but is still on the list
-        
+        update_table = False
 
-        #if current date fits to the dates in 
-        curr_date = date.today().strftime("%d/%m/%Y")
-        pass
+        #if len(self.bot.guilds) > 0:
+        if self.bot.is_ready():
+            update_table = await self.remove_left_users_from_database()
 
-    @check_role.before_loop
-    async def before_check_role(self):
-        #load whole database into current memory
-        pass
+            curr_date = datetime.utcnow().strftime("%d-%m")
+
+            for userid, birthday, is_congratulated, _ in birthday_database_ops.get_birthday_users(self.birthday_database_connection):
+                if birthday == curr_date and is_congratulated == 0:
+                    await self.congratulate(int(userid))
+                if birthday != curr_date and is_congratulated == 1:
+                    user = self.bot.guilds[self.sket_or_test_server].get_member(int(userid))
+                    await self.remove_bd_role(user)
+            
+            print(curr_date)
 
 ##################### HELPERS ##################################################################
     def already_on_list(self, member: discord.Member):
         '''checks if member is already on the list and in the database'''
 
-        for userid in birthday_database_ops.get_birthday_users(self.birthday_database_connection):
-            if str(member.id) == userid:
+        for userid, _, _, _ in birthday_database_ops.get_birthday_users(self.birthday_database_connection):
+            if member.id == int(userid):
                 return True
 
-        return False 
+        return False
 
     async def query_birthday_data(self, ctx):
         #answering day
@@ -188,15 +195,6 @@ class BirthdayCog(commands.Cog):
             await ctx.send(f"invalid input format - input has to be a NUMBER between 1 and 12")
             return
 
-        #answering year
-        year_embed = embeds.year_embed()
-        await ctx.send(embed=year_embed)
-        try:
-            year = int((await utilities.wait_for_message(self.bot, ctx, timeout=20)).content)
-        except:
-            await ctx.send(f"invalid input format - input has to be a NUMBER between 1900 and {date.today().year - 12}")
-            return
-
         timezone = None
         #TODO FUTURE FEATURE 
         # if await utilities.wait_for_query(self.bot, ctx, message="Do you want to add your timezone for more accuracy?"):
@@ -211,18 +209,92 @@ class BirthdayCog(commands.Cog):
         #         await ctx.send(f"invalid timezone input - timezone has to be one of these shown above")
         #         return
 
-        return (day, month, year, timezone)
+        return (day, month, timezone)
 
     async def remove_bd_role(self, member: discord.Member):
-        await member.remove_roles(list(discord.utils.find(lambda role: role.id == self.bd_role_id, self.bot.guilds[0].roles)))     
+        if a:=discord.utils.find(lambda role: role.id == self.bd_role_id, self.bot.guilds[self.sket_or_test_server].roles):
+            await member.remove_roles(a)
+            birthday_database_ops.set_congratulated(self.birthday_database_connection, member.id, False)   
 
     async def add_bd_role(self, member):
-        await member.add_roles(list(discord.utils.find(lambda role: role.id == self.bd_role_id, self.bot.guilds[0].roles)))
+        if a:=discord.utils.find(lambda role: role.id == self.bd_role_id, self.bot.guilds[self.sket_or_test_server].roles):
+            await member.add_roles(a)
+            birthday_database_ops.set_congratulated(self.birthday_database_connection, member.id, True)
 
-    def show_table(self):
+    async def remove_left_users_from_database(self):
+        '''checks, if there are users in the database, which are not in the server anymore and removes them
+        returns true, if users got deleted, false if no one left
+        '''
+        removed_user = False
+
+        intents = discord.Intents.default()
+        intents.members = True
+
+        for memberid, _, _, _ in birthday_database_ops.get_birthday_users(self.birthday_database_connection):
+            await self.bot.guilds[self.sket_or_test_server].fetch_members(limit=None).flatten()
+            if self.bot.guilds[self.sket_or_test_server].get_member(int(memberid)) is None:
+                birthday_database_ops.remove_birthday(self.birthday_database_connection, memberid)
+                removed_user = True
+
+        return removed_user
+
+    async def update_table(self):
         #TODO
-        pass
+        embed=discord.Embed(title="Sket Birthdays", color=0xff0000)
+        embed.set_thumbnail(url="https://www.tazi.graphics/wp-content/uploads/happy-birthday-pink-preview-1000x750.jpg")
 
-    async def birthday_notification(self, channelid, userid):
-        '''mentions the user who has birthday'''
-        pass
+        for userid, username, birthday, _ in birthday_database_ops.get_birthday_users(self.birthday_database_connection):
+            embed.add_field(name=username, value=birthday, inline=True)
+
+        channel = self.bot.guilds[self.sket_or_test_server].get_channel(self.bd_channel_id)
+
+        if len(birthday_database_ops.get_bd_channel(self.birthday_database_connection)) > 0:
+            for messageid, channelid in birthday_database_ops.get_bd_channel(self.birthday_database_connection):
+                channel = self.bot.guilds[self.sket_or_test_server].get_channel(int(channelid))
+                former_message = await channel.fetch_message(int(messageid))
+                await channel.delete_messages([former_message])
+
+                message = await channel.send(embed=embed)
+                birthday_database_ops.set_bd_channel(self.birthday_database_connection, message.id, former_message, channelid)
+        else:
+            channel = self.bot.guilds[self.sket_or_test_server].get_channel(self.bd_channel_id)
+            message = await channel.send(embed=embed)
+            birthday_database_ops.set_bd_channel(self.birthday_database_connection, message.id, None, self.bd_channel_id)
+        
+
+    async def congratulate(self, userid):
+        '''mentions the user who has birthday and assigns the birthday role'''
+        user = self.bot.guilds[self.sket_or_test_server].get_member(userid)
+        channel = self.bot.guilds[self.sket_or_test_server].get_channel(self.bd_channel_id)
+
+        await self.add_bd_role(user)
+
+        await channel.send(f"BDAY {user.mention}")
+
+    def get_number_as_month_name(self, number):
+        if number == 1:
+            return "January"
+        elif number == 2:
+            return "February"
+        elif number == 3:
+            return "March"
+        elif number == 4:
+            return "April"
+        elif number == 5:
+            return "May"
+        elif number == 6:
+            return "June"
+        elif number == 7:
+            return "July"
+        elif number == 8:
+            return "August"
+        elif number == 9:
+            return "September"
+        elif number == 10:
+            return "October"
+        elif number == 11:
+            return "November"
+        elif number == 12:
+            return "December"
+        else:
+            return None
