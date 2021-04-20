@@ -8,6 +8,8 @@ import sqlite3
 import os
 import birthday_database_ops
 import embeds
+import re
+import birthday_utils
 
 class BirthdayCog(commands.Cog):
     admin_roles = ["Admin", "Mod(keeping the streets clean)"]
@@ -151,13 +153,12 @@ class BirthdayCog(commands.Cog):
     async def check_role(self):
         update_table = False
 
-        #if len(self.bot.guilds) > 0:
         if self.bot.is_ready():
-            update_table = await self.remove_left_users_from_database()
+            #update_table = await self.remove_left_users_from_database()
 
             curr_date = datetime.utcnow().strftime("%d-%m")
 
-            for userid, birthday, is_congratulated, _ in birthday_database_ops.get_birthday_users(self.birthday_database_connection):
+            for userid, username, birthday, is_congratulated, _ in birthday_database_ops.get_birthday_users(self.birthday_database_connection):
                 if birthday == curr_date and is_congratulated == 0:
                     await self.congratulate(int(userid))
                 if birthday != curr_date and is_congratulated == 1:
@@ -170,7 +171,7 @@ class BirthdayCog(commands.Cog):
     def already_on_list(self, member: discord.Member):
         '''checks if member is already on the list and in the database'''
 
-        for userid, _, _, _ in birthday_database_ops.get_birthday_users(self.birthday_database_connection):
+        for userid, _, _, _, _ in birthday_database_ops.get_birthday_users(self.birthday_database_connection):
             if member.id == int(userid):
                 return True
 
@@ -230,7 +231,7 @@ class BirthdayCog(commands.Cog):
         intents = discord.Intents.default()
         intents.members = True
 
-        for memberid, _, _, _ in birthday_database_ops.get_birthday_users(self.birthday_database_connection):
+        for memberid, _, _, _, _ in birthday_database_ops.get_birthday_users(self.birthday_database_connection):
             await self.bot.guilds[self.sket_or_test_server].fetch_members(limit=None).flatten()
             if self.bot.guilds[self.sket_or_test_server].get_member(int(memberid)) is None:
                 birthday_database_ops.remove_birthday(self.birthday_database_connection, memberid)
@@ -239,28 +240,41 @@ class BirthdayCog(commands.Cog):
         return removed_user
 
     async def update_table(self):
-        #TODO
-        embed=discord.Embed(title="Sket Birthdays", color=0xff0000)
-        embed.set_thumbnail(url="https://www.tazi.graphics/wp-content/uploads/happy-birthday-pink-preview-1000x750.jpg")
+        bd_table = ""
 
-        for userid, username, birthday, _ in birthday_database_ops.get_birthday_users(self.birthday_database_connection):
-            embed.add_field(name=username, value=birthday, inline=True)
+        birthday_list = []
 
-        channel = self.bot.guilds[self.sket_or_test_server].get_channel(self.bd_channel_id)
+        for userid, username, birthday, _, _ in birthday_database_ops.get_birthday_users(self.birthday_database_connection):
+            m = re.search(r"(\d\d)-(\d\d)", birthday)
+            day = int(m.group(1))
+            month = int(m.group(2))
 
-        if len(birthday_database_ops.get_bd_channel(self.birthday_database_connection)) > 0:
-            for messageid, channelid in birthday_database_ops.get_bd_channel(self.birthday_database_connection):
-                channel = self.bot.guilds[self.sket_or_test_server].get_channel(int(channelid))
-                former_message = await channel.fetch_message(int(messageid))
-                await channel.delete_messages([former_message])
-
-                message = await channel.send(embed=embed)
-                birthday_database_ops.set_bd_channel(self.birthday_database_connection, message.id, former_message, channelid)
-        else:
-            channel = self.bot.guilds[self.sket_or_test_server].get_channel(self.bd_channel_id)
-            message = await channel.send(embed=embed)
-            birthday_database_ops.set_bd_channel(self.birthday_database_connection, message.id, None, self.bd_channel_id)
+            birthday_list.append((userid, username, day, month))
         
+        #sorted list
+        birthday_list = sorted(birthday_list, key=lambda e: (self.takeFourth(e), self.takeThird(e)))
+
+    
+
+        #channel = self.bot.guilds[self.sket_or_test_server].get_channel(self.bd_channel_id)
+
+        # if len(birthday_database_ops.get_bd_channel(self.birthday_database_connection)) > 0:
+        #     for messageid, channelid in birthday_database_ops.get_bd_channel(self.birthday_database_connection):
+        #         channel = self.bot.guilds[self.sket_or_test_server].get_channel(int(channelid))
+        #         former_message = await channel.fetch_message(int(messageid))
+        #         await channel.delete_messages([former_message])
+
+        #         message = await channel.send(embed=embed)
+        #         birthday_database_ops.set_bd_channel(self.birthday_database_connection, message.id, former_message, channelid)
+        # else:
+        #     channel = self.bot.guilds[self.sket_or_test_server].get_channel(self.bd_channel_id)
+        #     message = await channel.send(embed=embed)
+        #     birthday_database_ops.set_bd_channel(self.birthday_database_connection, message.id, None, self.bd_channel_id)
+    
+    def takeThird(self, elem):
+        return elem[2]
+    def takeFourth(self, elem):
+        return elem[3]
 
     async def congratulate(self, userid):
         '''mentions the user who has birthday and assigns the birthday role'''
@@ -271,30 +285,4 @@ class BirthdayCog(commands.Cog):
 
         await channel.send(f"BDAY {user.mention}")
 
-    def get_number_as_month_name(self, number):
-        if number == 1:
-            return "January"
-        elif number == 2:
-            return "February"
-        elif number == 3:
-            return "March"
-        elif number == 4:
-            return "April"
-        elif number == 5:
-            return "May"
-        elif number == 6:
-            return "June"
-        elif number == 7:
-            return "July"
-        elif number == 8:
-            return "August"
-        elif number == 9:
-            return "September"
-        elif number == 10:
-            return "October"
-        elif number == 11:
-            return "November"
-        elif number == 12:
-            return "December"
-        else:
-            return None
+    

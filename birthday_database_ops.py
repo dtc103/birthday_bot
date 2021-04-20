@@ -42,13 +42,13 @@ def remove_birthday(database_connection, userid: int):
 def get_birthday_users(database_connection):
     db_cursor = database_connection.cursor()
     
-    stmt = "SELECT userid, birthday, is_congratulated, timezone FROM birthdays;"
+    stmt = "SELECT userid, username, birthday, is_congratulated, timezone FROM birthdays;"
     db_cursor.execute(stmt)
 
     userids = []
 
-    for userinfo in db_cursor:
-        userids.append((userinfo[0], userinfo[1], userinfo[2], userinfo[3]))
+    for userinfo in db_cursor.fetchall():
+        userids.append((userinfo[0], userinfo[1], userinfo[2], userinfo[3], userinfo[4]))
 
     return userids
 
